@@ -141,7 +141,7 @@ def check_conditional(conditional):
         return not var.startswith("$")
     def is_unset(var):
         return var.startswith("$")
-    return eval(conditional)
+    return eval(conditional.replace("\n", "\\n"))
 
 def is_executable(path):
     '''is the given path executable?'''
@@ -321,7 +321,7 @@ def varReplace(raw, vars, depth=0):
 
     return ''.join(done)
 
-_FILEPIPECRE = re.compile(r"\$(?P<special>FILE|PIPE)\(([^\}]+)\)")
+_FILEPIPECRE = re.compile(r"\$(?P<special>FILE|PIPE)\(([^\)]+)\)")
 def varReplaceFilesAndPipes(basedir, raw):
     done = [] # Completed chunks to return
 
@@ -334,19 +334,22 @@ def varReplaceFilesAndPipes(basedir, raw):
         # Determine replacement value (if unknown variable then preserve
         # original)
 
+        replacement = m.group()
         if m.group(1) == "FILE":
+            path = path_dwim(basedir, m.group(2))
             try:
-                f = open(path_dwim(basedir, m.group(2)), "r")
+                f = open(path, "r")
+                replacement = f.read()
+                f.close()
             except IOError:
-                raise VarNotFoundException()
-            replacement = f.read()
-            f.close()
+                raise errors.AnsibleError("$FILE(%s) failed" % path)
         elif m.group(1) == "PIPE":
             p = subprocess.Popen(m.group(2), shell=True, stdout=subprocess.PIPE)
             (stdout, stderr) = p.communicate()
-            if p.returncode != 0:
-                raise VarNotFoundException()
-            replacement = stdout
+            if p.returncode == 0:
+                replacement = stdout
+            else:
+                raise errors.AnsibleError("$PIPE(%s) returned %d" % (m.group(2), p.returncode))
 
         start, end = m.span()
         done.append(raw[:start])    # Keep stuff leading up to token
